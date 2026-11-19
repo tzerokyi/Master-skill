@@ -1,0 +1,69 @@
+name: Native Rust core
+
+on:
+  push:
+    branches:
+      - main
+      - 'feat/native-rust-core-*'
+    paths:
+      - 'crates/master-skill-core/**'
+      - '.github/workflows/native-rust-core.yml'
+  pull_request:
+    paths:
+      - 'crates/master-skill-core/**'
+      - '.github/workflows/native-rust-core.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    # Never execute external fork PR code on the owner's local runner.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux]
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: '12'
+      CARGO_INCREMENTAL: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Persistent warm Cargo target
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.cache/master-skill/native-core-target"
+          echo "CARGO_TARGET_DIR=$HOME/.cache/master-skill/native-core-target" >> "$GITHUB_ENV"
+      - name: Strict clippy
+        run: cargo clippy --manifest-path crates/master-skill-core/Cargo.toml --all-targets -- -D warnings
+      - name: Standalone crate tests
+        run: cargo test --manifest-path crates/master-skill-core/Cargo.toml --all-targets
+      - name: Checkout-backed parity and CLI tests
+        run: cargo test --manifest-path crates/master-skill-core/Cargo.toml --all-targets --features repository-fixtures
+      - name: Build native release CLI
+        run: cargo build --manifest-path crates/master-skill-core/Cargo.toml --release --bin master-skill
+      - name: Smoke test binary without Node or Python
+        shell: bash
+        run: |
+          set -euo pipefail
+          CLI="$CARGO_TARGET_DIR/release/master-skill"
+          "$CLI" --help
+          "$CLI" --root . list --json | grep -q '"skillCount": 21'
+          "$CLI" --root . inspect huineng --json | grep -q '"name": "master-huineng"'
+          "$CLI" --root . recommend "禅宗从哪开始学" --json | grep -q '"mode": "master-curriculum"'
+          "$CLI" --root . search huineng "无念" --json | grep -q '"section"'
+          "$CLI" --root . cite huineng "无念" --json > /dev/null
+          "$CLI" --root . doctor --json | grep -q '"catalogSkills": 21'
+      - name: Verify rustfmt (emit patch for remote review)
+        shell: bash
+        run: |
+          if ! cargo fmt --manifest-path crates/master-skill-core/Cargo.toml --all -- --check; then
+            cargo fmt --manifest-path crates/master-skill-core/Cargo.toml --all
+            git diff -- crates/master-skill-core
+            exit 1
+          fi

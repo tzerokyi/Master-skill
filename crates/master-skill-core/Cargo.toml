@@ -1,0 +1,29 @@
+[package]
+name = "master-skill-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+description = "Native, source-grounded Master-skill catalog, routing, and citation core"
+repository = "https://github.com/tzerokyi/Master-skill"
+readme = "README.md"
+keywords = ["buddhism", "cli", "rag", "skills"]
+categories = ["command-line-utilities", "text-processing"]
+
+[lib]
+name = "master_skill_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "master-skill"
+path = "src/main.rs"
+
+[features]
+default = []
+repository-fixtures = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+unicode-normalization = "0.1"
+sha2 = "0.10"
