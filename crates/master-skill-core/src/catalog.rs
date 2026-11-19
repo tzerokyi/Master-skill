@@ -289,6 +289,73 @@ pub(crate) fn doctor(repo: &Repository) -> Result<DoctorReport> {
                 name: skill.name.clone(), message: format!("{} is missing SKILL.md", skill.name) });
         }
     }
+    // Verify the actual installed data against the package, not only the
+    // checkout's SKILL.md. Missing, edited, and linked files remain visible.
+    for skill in &repo.catalog.skills {
+        let dest = repo.install_root.join(&skill.install_dir);
+        let stat = match fs::symlink_metadata(&dest) {
+            Ok(stat) => stat,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(err.into()),
+        };
+        if !stat.is_dir() || stat.file_type().is_symlink() {
+            problems.push(Problem {
+                code: "installed-non-directory".into(), name: skill.name.clone(),
+                message: format!("{} is not a regular directory", skill.name),
+            });
+            continue;
+        }
+        if !dest.join("SKILL.md").is_file() {
+            problems.push(Problem {
+                code: "installed-missing-skill-md".into(), name: skill.name.clone(),
+                message: format!("{} is installed without SKILL.md", skill.name),
+            });
+            continue;
+        }
+        let changes = crate::install::local_modifications(&dest, &skill.name)?;
+        if !changes.is_empty() {
+            problems.push(Problem {
+                code: "installed-local-modifications".into(), name: skill.name.clone(),
+                message: format!("{} has {} local modification(s)", skill.name, changes.len()),
+            });
+        }
+        let source = repo.source(skill)?;
+        let mut missing = 0;
+        let mut changed = 0;
+        for rel in crate::install::source_files(repo, skill)? {
+            let target = dest.join(&rel);
+            if !target.is_file() {
+                missing += 1;
+            } else if crate::install::sha256_regular(&source.join(&rel))?
+                != crate::install::sha256_regular(&target).unwrap_or_default() {
+                changed += 1;
+            }
+        }
+        if missing != 0 {
+            problems.push(Problem {
+                code: "installed-incomplete".into(), name: skill.name.clone(),
+                message: format!("{} missing {missing} package file(s)", skill.name),
+            });
+        }
+        if changed != 0 {
+            problems.push(Problem {
+                code: "installed-outdated".into(), name: skill.name.clone(),
+                message: format!("{} differs from package in {changed} file(s)", skill.name),
+            });
+        }
+        if skill.requires.as_deref() == Some("all-personas") {
+            let absent = repo.catalog.skills.iter()
+                .filter(|entry| entry.kind == SkillKind::Persona &&
+                    !repo.install_root.join(&entry.install_dir).join("meta.json").is_file())
+                .count();
+            if absent != 0 {
+                problems.push(Problem {
+                    code: "missing-dependency".into(), name: skill.name.clone(),
+                    message: format!("{} requires {absent} missing personas", skill.name),
+                });
+            }
+        }
+    }
     let known: HashSet<&str> = repo.catalog.skills.iter().map(|s| s.install_dir.as_str()).collect();
     let installed_catalog_skills = installed_names.iter()
         .filter(|name| known.contains(name.as_str())).count();

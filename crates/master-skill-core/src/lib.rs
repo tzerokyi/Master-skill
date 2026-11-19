@@ -4,11 +4,15 @@
 //! desktop window, network service, or global process state is required.
 //! Persona data is NOT bundled in this MIT-licensed crate: the caller supplies
 //! a Master-skill checkout, whose content has separate licenses.
+mod builder;
 mod catalog;
+mod install;
 mod routing;
 mod search;
 
+pub use builder::{derive_citation_contract, review_inputs, Approval, CitationContract, Review, ReviewInputs, TeacherOptions, TeacherResult, TeacherSpec};
 pub use catalog::{Catalog, CatalogSkill, DoctorReport, Inspect, Inventory, SkillKind};
+pub use install::{InstallAction, InstallOptions, InstallReport};
 pub use routing::{MasterMatch, Recommendation};
 pub use search::{CitationHit, SearchHit};
 

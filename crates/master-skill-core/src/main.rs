@@ -2,7 +2,7 @@
 //! No shell subprocess, interpreter, browser, listener or desktop framework.
 use std::env;
 use std::path::PathBuf;
-use master_skill_core::Repository;
+use master_skill_core::{InstallOptions, Repository, TeacherOptions, TeacherSpec};
 use serde::Serialize;
 
 const HELP: &str = r#"master-skill (native Rust core)
@@ -18,9 +18,19 @@ COMMANDS:
   cite <name> <text...>        Find declared citation lines in local sources/
   doctor                       Check checkout and installed skill directories
   validate                     Validate catalog, routing, and skill paths
+  install <names...> | --all    Install selected skills transactionally
+  update --all                 Reinstall catalog with change protection
+  uninstall <names...>         Remove selected installed skills
+  review-teacher --spec FILE   Prepare canonical review hashes for persona spec
+  build-teacher --spec FILE    Build approved persona into --output DIR
 
 OPTIONS:
   --root PATH                  Checkout root (or MASTER_SKILL_ROOT)
+  --install-root PATH          Alternative target directory (default ~/.claude/skills)
+  --spec FILE                  JSON persona generation specification
+  --output DIR                 Destination directory for generated personas
+  --dry-run                    Preview writes without changing disk
+  --force                      Permit overwriting locally modified installs
   --json                       Print structured JSON on stdout
   --limit N                    Max search results (default 20, max 100)
   --master NAME                Named alternative to positional name for search/cite
@@ -29,13 +39,19 @@ OPTIONS:
   --help, -h                   Show help
   --version, -V                Show crate version
 
-Read-only phase 1: install/update/uninstall, Python generator, and the existing
-Node desktop bridge have NOT yet been ported. See README.md for migration status.
+Native reviewed offline generator is available; FoJin retrieval/LLM and desktop
+Node/Python bridge remain unported.
+See README.md for migration status.
 "#;
 
 #[derive(Default)]
 struct Options {
     root: Option<PathBuf>,
+    install_root: Option<PathBuf>,
+    spec: Option<PathBuf>,
+    output: Option<PathBuf>,
+    dry_run: bool,
+    force: bool,
     json: bool,
     brief: bool,
     limit: usize,
@@ -52,6 +68,12 @@ fn parse() -> std::result::Result<Options, String> {
             "--root" => opt.root = Some(PathBuf::from(
                 args.next().ok_or("--root requires a path")?)),
             "--json" => opt.json = true,
+            "--spec" => opt.spec = Some(PathBuf::from(args.next().ok_or("--spec needs JSON path")?)),
+            "--output" => opt.output = Some(PathBuf::from(args.next().ok_or("--output needs a path")?)),
+            "--dry-run" => opt.dry_run = true,
+            "--force" => opt.force = true,
+            "--install-root" => opt.install_root = Some(PathBuf::from(
+                args.next().ok_or("--install-root requires a path")?)),
             "--brief" => opt.brief = true,
             "--limit" => {
                 opt.limit = args.next().ok_or("--limit requires a number")?
@@ -64,6 +86,7 @@ fn parse() -> std::result::Result<Options, String> {
             "--q" | "--text" => opt.query = Some(args.next().ok_or("--q/--text requires text")?),
             "--help" | "-h" => opt.args.push("--help".into()),
             "--version" | "-V" => opt.args.push("--version".into()),
+            "--all" => opt.args.push("--all".into()),
             _ if arg.starts_with('-') => return Err(format!("unknown option: {arg}")),
             _ => opt.args.push(arg),
         }
@@ -111,7 +134,10 @@ fn execute(opt: Options) -> std::result::Result<i32, Box<dyn std::error::Error>>
         return Ok(0);
     }
     let root = discover(opt.root.clone())?;
-    let repo = Repository::open(root)?;
+    let mut repo = Repository::open(root)?;
+    if let Some(install_root) = &opt.install_root {
+        repo = repo.with_install_root(install_root);
+    }
     let command = opt.args.first().map(String::as_str).unwrap_or("");
     let args = &opt.args[1..];
     let status = match command {
@@ -168,6 +194,47 @@ fn execute(opt: Options) -> std::result::Result<i32, Box<dyn std::error::Error>>
             let hits = repo.citations(name, &query)?;
             if opt.json { print_json(&hits)?; }
             else { for hit in hits { println!("[{}] {}", hit.section, hit.citation); } }
+            0
+        }
+        "install" | "update" | "uninstall" => {
+            let options = InstallOptions { dry_run: opt.dry_run, force: opt.force };
+            let requested: Vec<String> = args.to_vec();
+            let data = match command {
+                "install" => repo.install(&requested, options)?,
+                "update" => {
+                    if requested.len() != 1 || requested[0] != "--all" {
+                        return Err("update accepts only --all".into());
+                    }
+                    repo.update_all(options)?
+                }
+                _ => repo.uninstall(&requested, options)?,
+            };
+            if opt.json { print_json(&data)?; }
+            else {
+                for action in data.actions {
+                    println!("{} {} -> {}", action.action, action.name, action.destination);
+                }
+            }
+            0
+        }
+        "review-teacher" | "build-teacher" => {
+            let spec_path = opt.spec.as_deref().ok_or("--spec FILE is required")?;
+            let spec: TeacherSpec = serde_json::from_slice(&std::fs::read(spec_path)?)?;
+            if command == "review-teacher" {
+                let inputs = repo.prepare_teacher(&spec)?;
+                if opt.json { print_json(&inputs)?; }
+                else {
+                    println!("doctrine: {}", inputs.doctrine_sha256);
+                    println!("voice: {}", inputs.voice_sha256);
+                }
+            } else {
+                let output = opt.output.as_deref().ok_or("--output DIR is required")?;
+                let data = repo.build_teacher(&spec, output, TeacherOptions {
+                    dry_run: opt.dry_run, force: opt.force,
+                })?;
+                if opt.json { print_json(&data)?; }
+                else { println!("{} -> {}", data.slug, data.directory); }
+            }
             0
         }
         "doctor" => {
