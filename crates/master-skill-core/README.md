@@ -19,6 +19,7 @@ MCP adapter. Core APIs return data, not CLI text or exit codes.
 From the repository root, run:
 
     cargo test --manifest-path crates/master-skill-core/Cargo.toml
+    cargo test --manifest-path crates/master-skill-core/Cargo.toml --features repository-fixtures
     cargo run --manifest-path crates/master-skill-core/Cargo.toml -- --help
     cargo run --manifest-path crates/master-skill-core/Cargo.toml -- --root . list --json
     cargo run --manifest-path crates/master-skill-core/Cargo.toml -- --root . inspect huineng --json

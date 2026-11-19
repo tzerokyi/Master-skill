@@ -125,7 +125,7 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     Ok(serde_json::from_slice(&fs::read(path)?)?)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "repository-fixtures"))]
 mod tests {
     use super::*;
     fn checkout() -> PathBuf {

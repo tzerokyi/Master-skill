@@ -204,7 +204,7 @@ fn main() {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "repository-fixtures"))]
 mod tests {
     use super::*;
     #[test]
